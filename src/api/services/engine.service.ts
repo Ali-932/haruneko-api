@@ -258,26 +258,21 @@ class EngineService {
         logger.info(`✅ Found plugin: ${plugin.Title} (${sourceId})`);
 
         try {
-            // First, ensure we have the manga list loaded
+            // Try to find manga in cache first
             const currentMangas = plugin.Entries.Value;
             logger.info(`📦 Current cached manga count: ${currentMangas.length}`);
 
-            if (currentMangas.length === 0) {
-                logger.info(`🔄 No manga cached, fetching manga list first...`);
-                await plugin.Update();
-                logger.info(`✅ Manga list loaded: ${plugin.Entries.Value.length} manga`);
-            }
-
-            const mangas = plugin.Entries;
-            const manga = mangas.Value.find((m: any) => m.Identifier === mangaId);
+            let manga = currentMangas.find((m: any) => m.Identifier === mangaId);
 
             if (!manga) {
-                logger.warn(`❌ Manga not found: ${mangaId} in source ${sourceId}`);
-                logger.info(`📋 Available manga IDs (first 10):`, mangas.Value.slice(0, 10).map((m: any) => m.Identifier));
-                throw Errors.MangaNotFound(mangaId);
+                logger.info(`🔄 Manga not in cache, creating direct manga object...`);
+                // Create manga object directly without fetching all mangas
+                // This is much faster than fetching the entire manga list
+                manga = plugin.CreateEntry(mangaId, `Manga ${mangaId}`);
+                logger.info(`✅ Created manga object for ID: ${mangaId}`);
+            } else {
+                logger.info(`✅ Found manga in cache: "${manga.Title}" (${mangaId})`);
             }
-
-            logger.info(`✅ Found manga: "${manga.Title}" (${mangaId})`);
 
             // Check if chapters are already loaded for this manga
             const currentChapters = manga.Entries.Value;

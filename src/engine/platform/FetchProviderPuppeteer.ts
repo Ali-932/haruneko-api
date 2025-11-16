@@ -1,5 +1,6 @@
 import puppeteer, { type Browser, type Page } from 'puppeteer';
 import { JSDOM, VirtualConsole } from 'jsdom';
+import { ProxyAgent } from 'undici';
 import { FetchProvider, type ScriptInjection } from './FetchProviderCommon.js';
 import { config } from '../../config/settings.js';
 import { logger } from '../../config/logger.js';
@@ -13,6 +14,17 @@ export class FetchProviderPuppeteer extends FetchProvider {
     private browser: Browser | null = null;
     private browserPool: Page[] = [];
     private readonly maxBrowsers = config.puppeteer.maxBrowsers;
+    private proxyAgent: ProxyAgent | undefined;
+
+    constructor() {
+        super();
+        // Initialize proxy agent if proxy environment variable is set
+        const proxyUrl = process.env.https_proxy || process.env.HTTPS_PROXY || process.env.http_proxy || process.env.HTTP_PROXY;
+        if (proxyUrl) {
+            logger.info(`🌐 Configuring proxy: ${proxyUrl.split('@')[proxyUrl.split('@').length - 1]}`);
+            this.proxyAgent = new ProxyAgent({ uri: proxyUrl });
+        }
+    }
 
     /**
      * Initialize browser instance
@@ -104,7 +116,9 @@ export class FetchProviderPuppeteer extends FetchProvider {
     public async Fetch(request: Request): Promise<Response> {
         // Try standard fetch first
         try {
-            const response = await fetch(request);
+            // Use proxy agent if configured
+            const fetchOptions: RequestInit = this.proxyAgent ? { dispatcher: this.proxyAgent } : {};
+            const response = await fetch(request, fetchOptions);
             await this.ValidateResponse(response);
             return response;
         } catch (error) {
