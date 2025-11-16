@@ -275,6 +275,8 @@ export function ChaptersSinglePageCSS(query = queryChapterListLinks, extract = D
 export async function FetchChaptersSinglePageAJAXv1(this: MangaScraper, manga: Manga, query = queryChapterListLinks, path = pathname, extract = DefaultInfoExtractor): Promise<Chapter[]> {
     const id = JSON.parse(manga.Identifier) as MangaID;
     const uri = new URL(path + '/wp-admin/admin-ajax.php', this.URI);
+    // Use the manga page URL as referer, not the base URL
+    const mangaPageUrl = new URL(id.slug, this.URI);
     const request = new Request(uri.href, {
         method: 'POST',
         body: new URLSearchParams({
@@ -283,7 +285,7 @@ export async function FetchChaptersSinglePageAJAXv1(this: MangaScraper, manga: M
         }).toString(),
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
-            'Referer': this.URI.href
+            'Referer': mangaPageUrl.href
         }
     });
     return FetchChaptersCSS.call(this, manga, request, query, extract);
@@ -316,10 +318,12 @@ export function ChaptersSinglePageAJAXv1(query = queryChapterListLinks, path = p
 export async function FetchChaptersSinglePageAJAXv2(this: MangaScraper, manga: Manga, query = queryChapterListLinks, extract = DefaultInfoExtractor): Promise<Chapter[]> {
     const id = JSON.parse(manga.Identifier) as MangaID;
     const uri = new URL((id.slug + '/ajax/chapters/').replace(/\/+/g, '/'), this.URI);
+    // Use the manga page URL as referer, not the base URL
+    const mangaPageUrl = new URL(id.slug, this.URI);
     const request = new Request(uri.href, {
         method: 'POST',
         headers: {
-            'Referer': this.URI.href
+            'Referer': mangaPageUrl.href
         }
     });
     return FetchChaptersCSS.call(this, manga, request, query, extract);
@@ -353,12 +357,14 @@ async function FetchChaptersMultiPageAJAX(this: MangaScraper, manga: Manga, quer
     const chapterList: Chapter[] = [];
     const { slug } = JSON.parse(manga.Identifier) as MangaID;
     const uri = new URL(`${slug}/ajax/chapters/`.replace(/\/+/g, '/'), this.URI);
+    // Use the manga page URL as referer, not the base URL
+    const mangaPageUrl = new URL(slug, this.URI);
     for (let page = 1, run = true; run; page++) {
         uri.searchParams.set('t', page.toString());
         const request = new Request(uri, {
             method: 'POST',
             headers: {
-                'Referer': this.URI.href
+                'Referer': mangaPageUrl.href
             }
         });
         const chapters: Chapter[] = await FetchChaptersCSS.call(this, manga, request, query, extract);
