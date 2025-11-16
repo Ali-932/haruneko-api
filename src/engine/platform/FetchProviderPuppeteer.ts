@@ -27,6 +27,26 @@ export class FetchProviderPuppeteer extends FetchProvider {
     }
 
     /**
+     * Sanitize response headers to remove invalid characters
+     * Cloudflare server-timing headers often contain newlines which are invalid in HTTP headers
+     */
+    private sanitizeHeaders(headers: Headers | Record<string, string>): HeadersInit {
+        const sanitizedHeaders: Record<string, string> = {};
+        const entries = headers instanceof Headers ? Array.from(headers.entries()) : Object.entries(headers);
+
+        for (const [key, value] of entries) {
+            // Replace newlines and carriage returns with commas to preserve multi-value headers
+            const sanitizedValue = value.replace(/[\r\n]+/g, ', ');
+            // Only include headers with valid values (no control characters)
+            if (!/[\x00-\x1F\x7F]/.test(sanitizedValue)) {
+                sanitizedHeaders[key] = sanitizedValue;
+            }
+        }
+
+        return sanitizedHeaders;
+    }
+
+    /**
      * Initialize browser instance
      */
     private async getBrowser(): Promise<Browser> {
@@ -120,7 +140,16 @@ export class FetchProviderPuppeteer extends FetchProvider {
             const fetchOptions: RequestInit = this.proxyAgent ? { dispatcher: this.proxyAgent } : {};
             const response = await fetch(request, fetchOptions);
             await this.ValidateResponse(response);
-            return response;
+
+            // Sanitize response headers to fix Cloudflare server-timing headers with newlines
+            const sanitizedHeaders = this.sanitizeHeaders(response.headers);
+            const body = await response.arrayBuffer();
+
+            return new Response(body, {
+                status: response.status,
+                statusText: response.statusText,
+                headers: sanitizedHeaders
+            });
         } catch (error) {
             // If Cloudflare challenge detected, use Puppeteer
             if (error.message?.includes('CloudFlare') || error.message?.includes('Forbidden')) {
@@ -154,21 +183,12 @@ export class FetchProviderPuppeteer extends FetchProvider {
             const headers = response.headers();
 
             // Sanitize headers to remove invalid characters (e.g., newlines in Cloudflare server-timing)
-            const sanitizedHeaders: Record<string, string> = {};
-            for (const [key, value] of Object.entries(headers)) {
-                // Replace newlines and carriage returns with commas to preserve multi-value headers
-                // or skip headers with invalid values entirely
-                const sanitizedValue = value.replace(/[\r\n]+/g, ', ');
-                // Only include headers with valid values (no control characters)
-                if (!/[\x00-\x1F\x7F]/.test(sanitizedValue)) {
-                    sanitizedHeaders[key] = sanitizedValue;
-                }
-            }
+            const sanitizedHeaders = this.sanitizeHeaders(headers);
 
             const responseInit: ResponseInit = {
                 status: response.status(),
                 statusText: response.statusText(),
-                headers: new Headers(sanitizedHeaders as HeadersInit),
+                headers: sanitizedHeaders,
             };
 
             return new Response(content, responseInit);
