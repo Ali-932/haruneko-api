@@ -1,5 +1,5 @@
 import puppeteer, { type Browser, type Page } from 'puppeteer';
-import { JSDOM } from 'jsdom';
+import { JSDOM, VirtualConsole } from 'jsdom';
 import { FetchProvider, type ScriptInjection } from './FetchProviderCommon.js';
 import { config } from '../../config/settings.js';
 import { logger } from '../../config/logger.js';
@@ -185,12 +185,30 @@ export class FetchProviderPuppeteer extends FetchProvider {
      */
     public override async FetchHTML(request: Request): Promise<Document> {
         const response = await this.Fetch(request);
-        const html = await response.text();
+        let html = await response.text();
+
+        // Strip out all CSS to prevent JSDOM CSS parsing errors
+        // This is necessary because many manga sites have malformed CSS that breaks JSDOM
+        // We only need the HTML structure for scraping, not the styles
+        html = html
+            // Remove <style> tags and their content
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+            // Remove inline style attributes
+            .replace(/\s+style\s*=\s*["'][^"']*["']/gi, '')
+            // Remove <link> tags for stylesheets
+            .replace(/<link[^>]*rel\s*=\s*["']stylesheet["'][^>]*>/gi, '');
+
+        // Create a virtual console that suppresses any remaining errors
+        const virtualConsole = new VirtualConsole();
+        virtualConsole.on('error', () => {
+            // Silently suppress all JSDOM errors
+        });
 
         // Use JSDOM to create a DOM
         const dom = new JSDOM(html, {
             url: request.url,
             contentType: 'text/html',
+            virtualConsole,
         });
 
         return dom.window.document;
