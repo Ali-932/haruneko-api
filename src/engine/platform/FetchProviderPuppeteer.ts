@@ -1,9 +1,15 @@
-import puppeteer, { type Browser, type Page } from 'puppeteer';
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import { type Browser, type Page } from 'puppeteer';
 import { JSDOM, VirtualConsole } from 'jsdom';
+import { ProxyAgent } from 'undici';
 import { FetchProvider, type ScriptInjection } from './FetchProviderCommon.js';
 import { config } from '../../config/settings.js';
 import { logger } from '../../config/logger.js';
 import { CheckAntiScrapingDetection, FetchRedirection } from './AntiScrapingDetection.js';
+
+// Apply stealth plugin to bypass Cloudflare bot detection
+puppeteer.use(StealthPlugin());
 
 /**
  * Puppeteer-based fetch provider for server-side environments
@@ -13,6 +19,37 @@ export class FetchProviderPuppeteer extends FetchProvider {
     private browser: Browser | null = null;
     private browserPool: Page[] = [];
     private readonly maxBrowsers = config.puppeteer.maxBrowsers;
+    private proxyAgent: ProxyAgent | undefined;
+
+    constructor() {
+        super();
+        // Initialize proxy agent if proxy environment variable is set
+        const proxyUrl = process.env.https_proxy || process.env.HTTPS_PROXY || process.env.http_proxy || process.env.HTTP_PROXY;
+        if (proxyUrl) {
+            logger.info(`🌐 Configuring proxy: ${proxyUrl.split('@')[proxyUrl.split('@').length - 1]}`);
+            this.proxyAgent = new ProxyAgent({ uri: proxyUrl });
+        }
+    }
+
+    /**
+     * Sanitize response headers to remove invalid characters
+     * Cloudflare server-timing headers often contain newlines which are invalid in HTTP headers
+     */
+    private sanitizeHeaders(headers: Headers | Record<string, string>): HeadersInit {
+        const sanitizedHeaders: Record<string, string> = {};
+        const entries = headers instanceof Headers ? Array.from(headers.entries()) : Object.entries(headers);
+
+        for (const [key, value] of entries) {
+            // Replace newlines and carriage returns with commas to preserve multi-value headers
+            const sanitizedValue = value.replace(/[\r\n]+/g, ', ');
+            // Only include headers with valid values (no control characters)
+            if (!/[\x00-\x1F\x7F]/.test(sanitizedValue)) {
+                sanitizedHeaders[key] = sanitizedValue;
+            }
+        }
+
+        return sanitizedHeaders;
+    }
 
     /**
      * Initialize browser instance
@@ -31,7 +68,6 @@ export class FetchProviderPuppeteer extends FetchProvider {
                         '--disable-gpu',
                         '--no-first-run',
                         '--no-zygote',
-                        '--disable-extensions',
                     ],
                 });
                 logger.info('✅ Puppeteer browser launched');
@@ -62,11 +98,11 @@ export class FetchProviderPuppeteer extends FetchProvider {
             const browser = await this.getBrowser();
             const page = await browser.newPage();
 
-            // Set realistic viewport and user agent
-            await page.setViewport({ width: 1920, height: 1080 });
-            await page.setUserAgent(
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-            );
+            // Set realistic viewport - stealth plugin handles user-agent and other fingerprints
+            await page.setViewport({
+                width: 1920,
+                height: 1080
+            });
 
             return page;
         }
@@ -104,9 +140,20 @@ export class FetchProviderPuppeteer extends FetchProvider {
     public async Fetch(request: Request): Promise<Response> {
         // Try standard fetch first
         try {
-            const response = await fetch(request);
+            // Use proxy agent if configured
+            const fetchOptions: RequestInit = this.proxyAgent ? { dispatcher: this.proxyAgent } : {};
+            const response = await fetch(request, fetchOptions);
             await this.ValidateResponse(response);
-            return response;
+
+            // Sanitize response headers to fix Cloudflare server-timing headers with newlines
+            const sanitizedHeaders = this.sanitizeHeaders(response.headers);
+            const body = await response.arrayBuffer();
+
+            return new Response(body, {
+                status: response.status,
+                statusText: response.statusText,
+                headers: sanitizedHeaders
+            });
         } catch (error) {
             // If Cloudflare challenge detected, use Puppeteer
             if (error.message?.includes('CloudFlare') || error.message?.includes('Forbidden')) {
@@ -124,6 +171,70 @@ export class FetchProviderPuppeteer extends FetchProvider {
         const page = await this.getPage();
 
         try {
+            // For POST/PUT/PATCH requests, we need to handle them differently
+            // because page.goto() only supports GET requests
+            if (request.method && request.method !== 'GET' && request.method !== 'HEAD') {
+                logger.info(`🔄 Handling ${request.method} request with Puppeteer evaluate...`);
+
+                // Extract the referer from headers to navigate to the correct page
+                // For WordPress Madara AJAX endpoints, the referer is the manga page
+                const referer = request.headers.get('Referer');
+                const pageToVisit = referer || new URL(request.url).origin;
+
+                logger.info(`🌐 Navigating to ${pageToVisit} to establish session...`);
+
+                const initialResponse = await page.goto(pageToVisit, {
+                    waitUntil: 'domcontentloaded',
+                    timeout: config.puppeteer.timeout,
+                });
+
+                if (!initialResponse) {
+                    throw new Error(`Failed to load ${pageToVisit}`);
+                }
+
+                // Wait for Cloudflare challenge on the page
+                await this.waitForCloudflare(page);
+                logger.info('✅ Cloudflare challenge passed, making POST request...');
+
+                // Now make the actual POST request using fetch within the page context
+                const requestHeaders: Record<string, string> = {};
+                request.headers.forEach((value, key) => {
+                    requestHeaders[key] = value;
+                });
+
+                const body = request.body ? await request.text() : undefined;
+
+                const result = await page.evaluate(async (url, method, headers, bodyText) => {
+                    const response = await fetch(url, {
+                        method,
+                        headers,
+                        body: bodyText,
+                    });
+
+                    return {
+                        status: response.status,
+                        statusText: response.statusText,
+                        headers: Object.fromEntries(response.headers.entries()),
+                        body: await response.text(),
+                    };
+                }, request.url, request.method, requestHeaders, body);
+
+                // Debug logging
+                logger.info(`📦 POST response status: ${result.status}`);
+                logger.info(`📦 POST response body length: ${result.body.length}`);
+                logger.info(`📦 POST response body preview: ${result.body.substring(0, 500)}`);
+
+                // Sanitize headers
+                const sanitizedHeaders = this.sanitizeHeaders(result.headers);
+
+                return new Response(result.body, {
+                    status: result.status,
+                    statusText: result.statusText,
+                    headers: sanitizedHeaders,
+                });
+            }
+
+            // For GET requests, use the standard page.goto approach
             const response = await page.goto(request.url, {
                 waitUntil: 'domcontentloaded',
                 timeout: config.puppeteer.timeout,
@@ -139,10 +250,13 @@ export class FetchProviderPuppeteer extends FetchProvider {
             const content = await page.content();
             const headers = response.headers();
 
+            // Sanitize headers to remove invalid characters (e.g., newlines in Cloudflare server-timing)
+            const sanitizedHeaders = this.sanitizeHeaders(headers);
+
             const responseInit: ResponseInit = {
                 status: response.status(),
                 statusText: response.statusText(),
-                headers: new Headers(headers as HeadersInit),
+                headers: sanitizedHeaders,
             };
 
             return new Response(content, responseInit);
@@ -154,24 +268,59 @@ export class FetchProviderPuppeteer extends FetchProvider {
     /**
      * Wait for Cloudflare challenge to complete
      */
-    private async waitForCloudflare(page: Page, maxWaitTime = 30000): Promise<void> {
+    private async waitForCloudflare(page: Page, maxWaitTime = 45000): Promise<void> {
         const startTime = Date.now();
+        let lastTitle = '';
 
         while (Date.now() - startTime < maxWaitTime) {
-            const isChallengePresent = await page.evaluate(() => {
-                // Check for common Cloudflare challenge indicators
-                return (
-                    document.title.toLowerCase().includes('just a moment') ||
-                    document.title.toLowerCase().includes('checking your browser') ||
-                    !!document.querySelector('#challenge-running') ||
-                    !!document.querySelector('.cf-browser-verification') ||
-                    !!document.querySelector('div[class*="cloudflare"]')
-                );
-            });
+            try {
+                const pageInfo = await page.evaluate(() => {
+                    return {
+                        title: document.title,
+                        hasChallenge: (
+                            document.title.toLowerCase().includes('just a moment') ||
+                            document.title.toLowerCase().includes('checking your browser') ||
+                            !!document.querySelector('#challenge-running') ||
+                            !!document.querySelector('.cf-browser-verification') ||
+                            !!document.querySelector('div[class*="cloudflare"]')
+                        ),
+                        url: window.location.href,
+                    };
+                });
 
-            if (!isChallengePresent) {
-                logger.info('Cloudflare challenge passed');
-                return;
+                // Log page title changes
+                if (pageInfo.title !== lastTitle) {
+                    logger.info(`📄 Page title: "${pageInfo.title}"`);
+                    lastTitle = pageInfo.title;
+                }
+
+                if (!pageInfo.hasChallenge) {
+                    logger.info('Cloudflare challenge passed');
+                    return;
+                }
+            } catch (error) {
+                // Execution context destroyed means page navigated (likely challenge completed)
+                if (error.message?.includes('Execution context was destroyed')) {
+                    logger.info('Page navigated during challenge check, waiting for navigation to complete...');
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    // After navigation completes, check once more
+                    try {
+                        const stillChallenging = await page.evaluate(() => {
+                            return (
+                                document.title.toLowerCase().includes('just a moment') ||
+                                document.title.toLowerCase().includes('checking your browser')
+                            );
+                        });
+                        if (!stillChallenging) {
+                            logger.info('Cloudflare challenge passed after navigation');
+                            return;
+                        }
+                    } catch {
+                        // If it errors again, continue the loop
+                    }
+                } else {
+                    throw error;
+                }
             }
 
             await new Promise(resolve => setTimeout(resolve, 500));
