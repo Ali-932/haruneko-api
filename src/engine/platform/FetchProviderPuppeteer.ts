@@ -268,20 +268,45 @@ export class FetchProviderPuppeteer extends FetchProvider {
         const startTime = Date.now();
 
         while (Date.now() - startTime < maxWaitTime) {
-            const isChallengePresent = await page.evaluate(() => {
-                // Check for common Cloudflare challenge indicators
-                return (
-                    document.title.toLowerCase().includes('just a moment') ||
-                    document.title.toLowerCase().includes('checking your browser') ||
-                    !!document.querySelector('#challenge-running') ||
-                    !!document.querySelector('.cf-browser-verification') ||
-                    !!document.querySelector('div[class*="cloudflare"]')
-                );
-            });
+            try {
+                const isChallengePresent = await page.evaluate(() => {
+                    // Check for common Cloudflare challenge indicators
+                    return (
+                        document.title.toLowerCase().includes('just a moment') ||
+                        document.title.toLowerCase().includes('checking your browser') ||
+                        !!document.querySelector('#challenge-running') ||
+                        !!document.querySelector('.cf-browser-verification') ||
+                        !!document.querySelector('div[class*="cloudflare"]')
+                    );
+                });
 
-            if (!isChallengePresent) {
-                logger.info('Cloudflare challenge passed');
-                return;
+                if (!isChallengePresent) {
+                    logger.info('Cloudflare challenge passed');
+                    return;
+                }
+            } catch (error) {
+                // Execution context destroyed means page navigated (likely challenge completed)
+                if (error.message?.includes('Execution context was destroyed')) {
+                    logger.info('Page navigated during challenge check, waiting for navigation to complete...');
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    // After navigation completes, check once more
+                    try {
+                        const stillChallenging = await page.evaluate(() => {
+                            return (
+                                document.title.toLowerCase().includes('just a moment') ||
+                                document.title.toLowerCase().includes('checking your browser')
+                            );
+                        });
+                        if (!stillChallenging) {
+                            logger.info('Cloudflare challenge passed after navigation');
+                            return;
+                        }
+                    } catch {
+                        // If it errors again, continue the loop
+                    }
+                } else {
+                    throw error;
+                }
             }
 
             await new Promise(resolve => setTimeout(resolve, 500));
