@@ -167,6 +167,60 @@ export class FetchProviderPuppeteer extends FetchProvider {
         const page = await this.getPage();
 
         try {
+            // For POST/PUT/PATCH requests, we need to handle them differently
+            // because page.goto() only supports GET requests
+            if (request.method && request.method !== 'GET' && request.method !== 'HEAD') {
+                logger.info(`🔄 Handling ${request.method} request with Puppeteer evaluate...`);
+
+                // First, navigate to the origin to establish cookies and bypass Cloudflare
+                const baseUrl = new URL(request.url).origin;
+                const initialResponse = await page.goto(baseUrl, {
+                    waitUntil: 'domcontentloaded',
+                    timeout: config.puppeteer.timeout,
+                });
+
+                if (!initialResponse) {
+                    throw new Error(`Failed to load ${baseUrl}`);
+                }
+
+                // Wait for Cloudflare challenge on the base page
+                await this.waitForCloudflare(page);
+                logger.info('✅ Cloudflare challenge passed, making POST request...');
+
+                // Now make the actual POST request using fetch within the page context
+                const requestHeaders: Record<string, string> = {};
+                request.headers.forEach((value, key) => {
+                    requestHeaders[key] = value;
+                });
+
+                const body = request.body ? await request.text() : undefined;
+
+                const result = await page.evaluate(async (url, method, headers, bodyText) => {
+                    const response = await fetch(url, {
+                        method,
+                        headers,
+                        body: bodyText,
+                    });
+
+                    return {
+                        status: response.status,
+                        statusText: response.statusText,
+                        headers: Object.fromEntries(response.headers.entries()),
+                        body: await response.text(),
+                    };
+                }, request.url, request.method, requestHeaders, body);
+
+                // Sanitize headers
+                const sanitizedHeaders = this.sanitizeHeaders(result.headers);
+
+                return new Response(result.body, {
+                    status: result.status,
+                    statusText: result.statusText,
+                    headers: sanitizedHeaders,
+                });
+            }
+
+            // For GET requests, use the standard page.goto approach
             const response = await page.goto(request.url, {
                 waitUntil: 'domcontentloaded',
                 timeout: config.puppeteer.timeout,
