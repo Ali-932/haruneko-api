@@ -35,8 +35,9 @@ manga_id = manga["id"]
 print(f"\nUsing: {manga['title']}")
 print(f"Getting chapters...")
 
-# Get all chapters
-chapters = service._get_chapters("mangahere", manga_id)
+# Get all chapters (with debug mode enabled)
+print(f"\n[DEBUG] Manga ID: {manga_id}")
+chapters = service._get_chapters("mangahere", manga_id, debug=True)
 
 print(f"\nTotal chapters: {len(chapters)}")
 print("\nFirst 10 chapters:")

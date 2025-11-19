@@ -425,7 +425,8 @@ class HaruNekoDownloadService:
     def _get_chapters(
         self,
         source_id: str,
-        manga_id_raw: str
+        manga_id_raw: str,
+        debug: bool = False
     ) -> List[Dict]:
         """
         Fetch all chapters for a manga
@@ -434,6 +435,8 @@ class HaruNekoDownloadService:
 
         def _make_request():
             url = f"{self.base_url}/sources/{source_id}/manga/{manga_id_encoded}/chapters"
+            if debug:
+                print(f"[DEBUG] Requesting: {url}")
             resp = self.session.get(url, headers=self.headers, timeout=15)
             resp.raise_for_status()
             return resp
@@ -441,9 +444,28 @@ class HaruNekoDownloadService:
         try:
             resp = self._request_with_retry(_make_request)
             data = resp.json()
+
+            if debug:
+                print(f"[DEBUG] Response status: {resp.status_code}")
+                print(f"[DEBUG] Response success: {data.get('success')}")
+                print(f"[DEBUG] Response data length: {len(data.get('data', []))}")
+                if not data.get('success'):
+                    print(f"[DEBUG] Response error: {data.get('error')}")
+
+            # Check if API returned an error
+            if not data.get("success", True):
+                error_msg = data.get("error", {})
+                print(f"[ERROR] API returned error: {error_msg}")
+                return []
+
             return data.get("data", [])
         except requests.HTTPError as e:
-            print(f"[ERROR] Failed to fetch chapters: {e}")
+            print(f"[ERROR] HTTP error fetching chapters: {e}")
+            if debug and hasattr(e, 'response') and e.response is not None:
+                print(f"[DEBUG] Response text: {e.response.text[:500]}")
+            return []
+        except Exception as e:
+            print(f"[ERROR] Failed to fetch chapters: {type(e).__name__}: {e}")
             return []
 
     def _download_chapters(
