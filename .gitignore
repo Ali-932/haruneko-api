@@ -34,3 +34,8 @@ coverage/
 web/
 app/
 docs/__pycache__/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
