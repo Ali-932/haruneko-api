@@ -1,88 +1,103 @@
 #!/usr/bin/env python3
 """
-Simple example script for HaruNeko Download Service
+Simple Example - Basic usage of HaruNeko Download Service
 
-This demonstrates the simplest way to validate and download manga chapters.
+⚠️  IMPORTANT: Start the HaruNeko API server FIRST!
+    cd .. && npm run dev
+
+Then verify it's running at: http://localhost:3000/api-docs
 """
 
 from haruneko_download_service import HaruNekoDownloadService
 
-# ============================================================================
-# CONFIGURATION - Change these values for your manga
-# ============================================================================
-
-BASE_URL = "http://localhost:3000/api/v1"
-SOURCE_ID = "mangahere"
-
-# Manga details
-MANGA_TITLE = "berserk"
-POST = "4737"
-SLUG = "/manga/berserk/"
-
-# Chapters to download (update with actual chapter IDs from your API)
-CHAPTER_IDS = [
-    "/manga/berserk/c001/",
-    "/manga/berserk/c002/",
-    "/manga/berserk/c003/",
-]
-
-# Download settings
-DOWNLOAD_FORMAT = "images"  # Options: images, cbz, pdf, epub
-DOWNLOAD_OPTIONS = {
-    "quality": "low",
-    "includeMetadata": True,
-}
-
-# ============================================================================
-# MAIN SCRIPT
-# ============================================================================
 
 def main():
-    """Main function to validate and download manga chapters"""
+    print("""
+╔══════════════════════════════════════════════════════════════════╗
+║         HaruNeko API Client - Simple Example                    ║
+╚══════════════════════════════════════════════════════════════════╝
+""")
 
-    # Initialize the service
-    print("Initializing HaruNeko Download Service...")
+    # Initialize service
     service = HaruNekoDownloadService(
-        base_url=BASE_URL,
+        base_url="http://localhost:3000/api/v1",
         download_root="downloads"
     )
 
-    # Validate and download
-    print(f"\nProcessing: {MANGA_TITLE}")
-    print(f"Source: {SOURCE_ID}")
-    print(f"Chapters: {len(CHAPTER_IDS)}")
-    print("-" * 60)
+    # Configuration
+    source_id = "mangadex"
+    search_query = "one piece"
 
-    result = service.validate_and_download(
-        source_id=SOURCE_ID,
-        manga_title=MANGA_TITLE,
-        post=POST,
-        slug=SLUG,
-        chapter_ids=CHAPTER_IDS,
-        format=DOWNLOAD_FORMAT,
-        options=DOWNLOAD_OPTIONS,
-        validate_only=False  # Set to True to only validate without downloading
-    )
+    print(f"Source: {source_id}")
+    print(f"Search: {search_query}")
+    print("-" * 70)
 
-    # Print results
-    print("\n" + "=" * 60)
-    if result["success"]:
-        print("✓ SUCCESS!")
-        print(f"Manga: {result['validation']['manga_title']}")
-        print(f"Chapters validated: {len(CHAPTER_IDS)}")
-        print(f"Download status: {result['download']['status_code']}")
-    else:
-        print("✗ FAILED!")
-        if result["validation"]:
-            print(f"Error: {result['validation']['error']}")
-            if result["validation"]["missing_chapters"]:
-                print(f"Missing chapters: {result['validation']['missing_chapters']}")
-        elif result["download"]:
-            print(f"Error: {result['download']['error']}")
-    print("=" * 60)
+    # Step 1: Search for manga
+    print("\n[1] Searching for manga...")
+    results = service.search_manga(source_id, search_query, page=1, limit=5)
 
-    return result
+    if not results:
+        print("❌ No manga found!")
+        return
+
+    print(f"✓ Found {len(results)} results")
+
+    # Step 2: Select first result
+    manga = results[0]
+    manga_id = manga["id"]
+    manga_title = manga.get("title", "Unknown")
+
+    print(f"\n[2] Selected: {manga_title}")
+
+    # Step 3: Get chapters
+    print(f"\n[3] Fetching chapters...")
+    chapters = service.fetch_chapters(source_id, manga_id)
+
+    if not chapters:
+        print("❌ No chapters found!")
+        return
+
+    print(f"✓ Found {len(chapters)} chapters")
+    print(f"First chapter: {chapters[0].get('title', 'Unknown')}")
+
+    # Step 4: Download first chapter (commented out by default)
+    print(f"\n[4] Download example (uncomment to actually download)")
+    print(f"To download, uncomment the code below in the script")
+
+    # Uncomment to actually download:
+    # chapter_ids = [chapters[0]["id"]]
+    # result = service.download_chapters(
+    #     source_id=source_id,
+    #     manga_id_raw=manga_id,
+    #     chapter_ids=chapter_ids,
+    #     format="cbz",
+    #     options={"quality": "high", "includeMetadata": True}
+    # )
+    #
+    # if result["success"]:
+    #     download_id = result["response"]["data"]["id"]
+    #     print(f"✓ Download started! ID: {download_id}")
+    #     print(f"Check status: GET /api/v1/downloads/{download_id}")
+    # else:
+    #     print(f"❌ Download failed: {result['error']}")
+
+    print("\n" + "=" * 70)
+    print("✓ Example complete!")
+    print("\nNext steps:")
+    print("1. Check out discover_and_download.py for interactive usage")
+    print("2. Read README.md for complete documentation")
+    print("=" * 70)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except ConnectionError as e:
+        print("\n❌ ERROR: Could not connect to API server!")
+        print("\nMake sure the HaruNeko API server is running:")
+        print("  $ cd .. && npm run dev")
+        print("\nThen verify at: http://localhost:3000/api-docs")
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
