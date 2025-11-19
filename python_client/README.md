@@ -42,7 +42,7 @@ service = HaruNekoDownloadService()
 
 # Just provide manga name and chapter numbers!
 result = service.download_manga_chapters(
-    source_id="mangadex",
+    source_id="mangahere",
     manga_name="One Piece",
     chapter_numbers=[1, 2, 3]
 )
@@ -65,7 +65,7 @@ Check if manga and chapters exist without downloading:
 
 ```python
 result = service.download_manga_chapters(
-    source_id="mangadex",
+    source_id="mangahere",
     manga_name="Berserk",
     chapter_numbers=[1, 2, 3],
     validate_only=True  # Just check, don't download
@@ -100,7 +100,7 @@ Works with decimal chapter numbers too:
 
 ```python
 result = service.download_manga_chapters(
-    source_id="mangadex",
+    source_id="mangahere",
     manga_name="One Piece",
     chapter_numbers=[1, 1.5, 2, 2.5, 3]  # Supports .5 chapters
 )
@@ -113,7 +113,7 @@ result = service.download_manga_chapters(
 Main method for downloading manga chapters.
 
 **Parameters:**
-- `source_id` (str): Source identifier (e.g., "mangadex", "mangahere")
+- `source_id` (str): Source identifier (e.g., "mangahere", "mangahere")
 - `manga_name` (str): Name of the manga to download
 - `chapter_numbers` (List[int|float|str]): Chapter numbers to download
 - `format` (str, optional): Download format - "cbz", "pdf", "epub", or "images" (default: "cbz")
@@ -151,7 +151,7 @@ service = HaruNekoDownloadService()
 
 # Step 1: Validate
 result = service.download_manga_chapters(
-    source_id="mangadex",
+    source_id="mangahere",
     manga_name="Attack on Titan",
     chapter_numbers=[1, 2, 3, 4, 5],
     validate_only=True
@@ -166,7 +166,7 @@ print(f"✓ All {len(result['chapters_found'])} chapters available")
 
 # Step 2: Download
 result = service.download_manga_chapters(
-    source_id="mangadex",
+    source_id="mangahere",
     manga_name="Attack on Titan",
     chapter_numbers=[1, 2, 3, 4, 5],
     format="cbz"
@@ -181,7 +181,7 @@ if result["success"]:
 
 ```python
 result = service.download_manga_chapters(
-    source_id="mangadex",
+    source_id="mangahere",
     manga_name="Non-Existent Manga",
     chapter_numbers=[1, 2, 3],
     validate_only=True
@@ -194,34 +194,76 @@ if not result["success"]:
         print(f"Missing chapters: {result['chapters_missing']}")
 ```
 
-## Checking Download Status
+## ⚠️ Important: Downloads are Asynchronous!
 
-After initiating a download, you'll get a download ID. Use it to check status:
+The HaruNeko API processes downloads in the **background**:
+
+1. `download_manga_chapters()` returns a download ID **immediately**
+2. The download processes asynchronously on the server
+3. You must **poll** the status endpoint to check progress
+4. When `status == 'completed'`, you can download the file
+
+### Complete Download Workflow with Polling
 
 ```python
+import time
 import requests
+from haruneko_download_service import HaruNekoDownloadService
 
-download_id = "your-download-id"
-response = requests.get(f"http://localhost:3000/api/v1/downloads/{download_id}")
-status = response.json()["data"]
+service = HaruNekoDownloadService()
 
-print(f"Status: {status['status']}")
-print(f"Progress: {status['progress']}%")
+# Step 1: Initiate download
+result = service.download_manga_chapters(
+    source_id="mangahere",
+    manga_name="One Piece",
+    chapter_numbers=[1],
+    format="cbz"
+)
 
-# When status is 'completed', download the file:
-if status['status'] == 'completed':
-    file_url = f"http://localhost:3000{status['fileUrl']}"
-    # Download: curl {file_url} -o manga.cbz
+if not result["success"]:
+    print(f"Failed: {result['error']}")
+    exit(1)
+
+download_id = result["download"]["response"]["data"]["id"]
+print(f"Download initiated! ID: {download_id}")
+
+# Step 2: Poll for completion
+base_url = "http://localhost:3000/api/v1"
+
+while True:
+    response = requests.get(f"{base_url}/downloads/{download_id}")
+    data = response.json()["data"]
+
+    status = data["status"]
+    progress = data.get("progress", 0)
+
+    print(f"\rStatus: {status} | Progress: {progress:.1f}%", end="", flush=True)
+
+    if status == "completed":
+        file_url = data["fileUrl"]
+        print(f"\n✓ Download complete!")
+        print(f"File URL: http://localhost:3000{file_url}")
+        break
+    elif status == "failed":
+        print(f"\n✗ Download failed: {data.get('error')}")
+        break
+
+    time.sleep(2)  # Wait 2 seconds before next poll
 ```
 
-Or via command line:
+### Quick Status Check
 
 ```bash
 # Check status
 curl http://localhost:3000/api/v1/downloads/{download_id}
 
-# Download completed file
+# Download completed file (only when status is 'completed')
 curl http://localhost:3000/api/v1/downloads/{download_id}/file -o manga.cbz
+```
+
+**Note:** If you try to download the file before it's completed, you'll get:
+```json
+{"success": false, "error": {"message": "Download is not completed yet"}}
 ```
 
 ## How It Works
@@ -246,7 +288,7 @@ The service finds manga using:
 ## Available Sources
 
 HaruNeko supports 788+ manga sources! Common ones:
-- mangadex
+- mangahere
 - mangahere
 - mangakakalot
 - manganato
@@ -291,9 +333,9 @@ cd /path/to/haruneko && npm run dev
 **Solution:** Try different spellings or check the source:
 ```python
 # Try variations
-service.download_manga_chapters("mangadex", "One Piece", [1])
-service.download_manga_chapters("mangadex", "One-Piece", [1])
-service.download_manga_chapters("mangadex", "OnePiece", [1])
+service.download_manga_chapters("mangahere", "One Piece", [1])
+service.download_manga_chapters("mangahere", "One-Piece", [1])
+service.download_manga_chapters("mangahere", "OnePiece", [1])
 ```
 
 ### Chapters Not Found
@@ -301,7 +343,7 @@ service.download_manga_chapters("mangadex", "OnePiece", [1])
 **Solution:** Validate first to see what's available:
 ```python
 result = service.download_manga_chapters(
-    "mangadex", "One Piece", [1, 2, 3],
+    "mangahere", "One Piece", [1, 2, 3],
     validate_only=True
 )
 print(f"Chapters found: {[ch['title'] for ch in result['chapters_found']]}")
