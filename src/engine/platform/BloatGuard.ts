@@ -1,20 +1,12 @@
-import { Runtime } from './PlatformInfo';
-import { PlatformInstanceActivator } from './PlatformInstanceActivator';
-import NodeWebkitBloatGuard from './nw/BloatGuard';
-import ElectronBloatGuard from './electron/BloatGuard';
 import NodeBloatGuard from './node/BloatGuard';
-import GetIPC from './InterProcessCommunication';
 
 export interface IBloatGuard {
     Initialize(): Promise<void>;
 }
 
 export function CreateBloatGuard(): IBloatGuard {
-    return new PlatformInstanceActivator<IBloatGuard>()
-        .Configure(Runtime.NodeWebkit, () => new NodeWebkitBloatGuard(patterns))
-        .Configure(Runtime.Electron, () => new ElectronBloatGuard(GetIPC(), patterns))
-        .Configure(Runtime.Node, () => new NodeBloatGuard())
-        .Create();
+    // API-only mode: always use Node bloat guard
+    return new NodeBloatGuard();
 }
 
 // Sort: https://www.online-utility.org/text/sort.jsp

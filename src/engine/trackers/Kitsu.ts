@@ -1,6 +1,8 @@
 import logo from './Kitsu.webp';
-import poster from '../../img/media.webp';
 import { TrackerResourceKey as R } from '../../i18n/ILocale';
+
+// Placeholder for missing poster images (API mode - no GUI assets needed)
+const poster = '';
 import { type MediaInfoTracker, type Info, MediaType, type TrackingStatus } from './IMediaInfoTracker';
 import { type SettingsManager, type ISettings, Text, Secret } from '../SettingsManager';
 import { FetchJSON } from '../platform/FetchProvider';

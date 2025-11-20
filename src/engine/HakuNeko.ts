@@ -1,4 +1,4 @@
-import { Initialize as InitGlobalSettings, Key as GlobalKey } from './SettingsGlobal';
+import { Initialize as InitGlobalSettings, Key as GlobalKey, type IFrontendInfo } from './SettingsGlobal';
 import { Tags } from './Tags';
 import { PluginController } from './PluginController';
 import { BookmarkPlugin } from './providers/BookmarkPlugin';
@@ -12,7 +12,6 @@ import { CreateBloatGuard } from './platform/BloatGuard';
 import { SetupFetchProvider } from './platform/FetchProvider';
 import { CreateRemoteProcedureCallManager } from './platform/RemoteProcedureCallManager';
 import { CreateRemoteProcedureCallContract } from './platform/RemoteProcedureCallContract';
-import type { IFrontendInfo } from '../frontend/IFrontend';
 import { Observable } from './Observable';
 
 export class HakuNeko {
