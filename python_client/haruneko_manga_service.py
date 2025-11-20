@@ -258,19 +258,31 @@ class HarunekoMangaService:
 
         # Extract number from user input (handles "1", "001", etc.)
         try:
-            user_number = int(''.join(filter(str.isdigit, normalized)))
+            user_number = float(''.join(filter(lambda c: c.isdigit() or c == '.', normalized)))
         except (ValueError, TypeError):
             return None
 
-        # Try to match by chapter number (handles various formats)
+        # Try to match by chapter number
+        # Pattern: "Ch.XXX" format (ignores volume numbers)
         for chap in chapters:
             title = chap["title"].strip().lower()
-            chapter_numbers = re.findall(r'\d+', title)
 
-            if chapter_numbers:
+            # Look for chapter number after "ch" keyword
+            # Matches: "ch.008", "ch008", "ch.8.1", "ch.262.5", etc.
+            chapter_match = re.search(r'ch\.?(\d+(?:\.\d+)?)', title)
+
+            if chapter_match:
                 try:
-                    chapter_number = int(chapter_numbers[0])
+                    chapter_number = float(chapter_match.group(1))
+
+                    # Exact match first (e.g., 8.1 matches only 8.1)
                     if user_number == chapter_number:
+                        return chap
+
+                    # Integer match only if both are integers (e.g., 8 matches 8.0 but not 8.1)
+                    if (user_number == int(user_number) and
+                        chapter_number == int(chapter_number) and
+                        int(user_number) == int(chapter_number)):
                         return chap
                 except (ValueError, TypeError):
                     continue
