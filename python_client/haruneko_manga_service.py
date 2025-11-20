@@ -96,23 +96,38 @@ class HarunekoMangaService:
             List of manga dictionaries
         """
         def _make_request():
+            url = f"{self.base_url}/api/v1/sources/{source}/search"
+            print(f"[DEBUG] Search URL: {url}?query={query}")
             resp = self.session.get(
-                f"{self.base_url}/api/v1/sources/{source}/search",
+                url,
                 params={"query": query},
                 timeout=30
             )
+            print(f"[DEBUG] Search response status: {resp.status_code}")
             resp.raise_for_status()
             return resp
 
-        resp = self._request_with_retry(_make_request)
-        data = resp.json()
+        try:
+            resp = self._request_with_retry(_make_request)
+            data = resp.json()
 
-        # Handle API response format
-        if isinstance(data, dict) and data.get('success'):
-            return data.get('data', [])
-        elif isinstance(data, list):
-            return data
-        else:
+            print(f"[DEBUG] Search response type: {type(data)}")
+            if isinstance(data, dict):
+                print(f"[DEBUG] Response keys: {list(data.keys())}")
+
+            # Handle API response format
+            if isinstance(data, dict) and data.get('success'):
+                results = data.get('data', [])
+                print(f"[DEBUG] Extracted {len(results)} results from data.data")
+                return results
+            elif isinstance(data, list):
+                print(f"[DEBUG] Response is list with {len(data)} items")
+                return data
+            else:
+                print(f"[DEBUG] Unknown response format, returning empty list")
+                return []
+        except Exception as e:
+            print(f"[ERROR] Search failed: {str(e)}")
             return []
 
     @staticmethod
@@ -146,7 +161,15 @@ class HarunekoMangaService:
             Manga dictionary or None if not found
         """
         results = self.search_manga(query, source)
+
+        print(f"[DEBUG] Search returned {len(results)} results")
+        if results and len(results) > 0:
+            print(f"[DEBUG] First 5 results:")
+            for i, r in enumerate(results[:5], 1):
+                print(f"  {i}. {r.get('title', 'NO TITLE')} (id: {r.get('id', 'NO ID')})")
+
         if not results:
+            print(f"[DEBUG] No results found for query: '{query}'")
             return None
 
         # Strategy 1: Try exact match first (case-insensitive)
@@ -163,7 +186,17 @@ class HarunekoMangaService:
                 print(f"[INFO] Found normalized match: '{hit['title']}' (searched for '{query}')")
                 return hit
 
-        # No match found
+        # Strategy 3: Partial match - if query is in the title
+        for hit in results:
+            if normalized_query in hit["title"].strip().lower():
+                print(f"[INFO] Found partial match: '{hit['title']}' (searched for '{query}')")
+                return hit
+
+        # No match found - show what we did find
+        print(f"[WARN] No match found for '{query}'. Available titles:")
+        for hit in results[:10]:
+            print(f"  - {hit['title']}")
+
         return None
 
     # 2. Get chapter list ------------------------------------------------------
