@@ -48,28 +48,72 @@ class ChapterPatternCollector:
         if last_error:
             raise last_error
 
-    def get_sources(self) -> List[str]:
-        """Get list of available sources"""
-        def _make_request():
-            resp = self.session.get(f"{self.base_url}/api/v1/sources", timeout=30)
-            resp.raise_for_status()
-            return resp
+    def get_all_manga(self, source: str, limit: int = 500) -> List[Dict]:
+        """
+        Fetch all manga from a source using pagination
 
-        try:
-            resp = self._request_with_retry(_make_request)
-            data = resp.json()
+        Args:
+            source: Source identifier
+            limit: Maximum number of manga to fetch
 
-            # Extract source IDs
-            if isinstance(data, dict) and data.get('success'):
-                sources = data.get('data', [])
-                return [s.get('id') for s in sources if s.get('id')]
-            elif isinstance(data, list):
-                return [s.get('id') for s in data if s.get('id')]
+        Returns:
+            List of manga dictionaries
+        """
+        print(f"[INFO] Fetching manga list from {source}...")
+        all_manga = []
+        page = 1
+        page_limit = 20
 
-            return []
-        except Exception as e:
-            print(f"[ERROR] Failed to get sources: {e}")
-            return []
+        while True:
+            try:
+                def _make_request():
+                    url = f"{self.base_url}/api/v1/sources/{source}/manga"
+                    resp = self.session.get(
+                        url,
+                        params={'page': page, 'limit': page_limit},
+                        timeout=30
+                    )
+                    resp.raise_for_status()
+                    return resp
+
+                resp = self._request_with_retry(_make_request)
+                data = resp.json()
+
+                if not data.get('success', False):
+                    print(f"[ERROR] API returned error: {data.get('error', 'Unknown error')}")
+                    break
+
+                manga_list = data.get('data', [])
+
+                if not manga_list:
+                    print(f"[INFO] Reached end of manga list at page {page}")
+                    break
+
+                all_manga.extend(manga_list)
+                print(f"  Page {page}: fetched {len(manga_list)} manga (total: {len(all_manga)})")
+
+                # Check if we've reached the limit
+                if len(all_manga) >= limit:
+                    print(f"[INFO] Reached limit of {limit} manga")
+                    all_manga = all_manga[:limit]
+                    break
+
+                # Check if there are more pages
+                meta = data.get('meta', {})
+                total_pages = meta.get('totalPages', 0)
+
+                if page >= total_pages:
+                    print(f"[INFO] Fetched all {len(all_manga)} manga from {total_pages} pages")
+                    break
+
+                page += 1
+                time.sleep(0.3)  # Rate limiting
+
+            except Exception as e:
+                print(f"[ERROR] Error fetching page {page}: {e}")
+                break
+
+        return all_manga
 
     def search_manga(self, query: str, source: str) -> List[Dict]:
         """Search for manga by title"""
@@ -121,13 +165,13 @@ class ChapterPatternCollector:
             print(f"[ERROR] Failed to fetch chapters for {manga_id}: {e}")
             return []
 
-    def collect_from_source(self, source: str, manga_queries: List[str], chapters_per_manga: int = 3) -> int:
+    def collect_from_manga_list(self, source: str, manga_list: List[Dict], chapters_per_manga: int = 3) -> int:
         """
-        Collect chapter patterns from a source
+        Collect chapter patterns from a list of manga
 
         Args:
             source: Source identifier
-            manga_queries: List of manga titles to search for
+            manga_list: List of manga dictionaries from API
             chapters_per_manga: Number of chapters to collect per manga
 
         Returns:
@@ -136,37 +180,28 @@ class ChapterPatternCollector:
         collected_count = 0
 
         print(f"\n{'='*70}")
-        print(f"Processing source: {source}")
+        print(f"Processing {len(manga_list)} manga from {source}")
         print(f"{'='*70}")
 
-        for query in manga_queries:
+        for idx, manga in enumerate(manga_list, 1):
             try:
-                print(f"\n[INFO] Searching for: {query}")
-
-                # Search for manga
-                results = self.search_manga(query, source)
-                if not results:
-                    print(f"[SKIP] No results found for '{query}'")
-                    continue
-
-                # Take the first result (usually most relevant)
-                manga = results[0]
                 manga_id = manga.get('id')
                 manga_title = manga.get('title')
 
                 if not manga_id:
-                    print(f"[SKIP] No manga ID for '{query}'")
+                    print(f"[{idx}/{len(manga_list)}] [SKIP] No manga ID")
                     continue
 
-                print(f"[INFO] Found: {manga_title} (ID: {manga_id})")
+                print(f"\n[{idx}/{len(manga_list)}] Processing: {manga_title}")
+                print(f"  ID: {manga_id}")
 
                 # Fetch chapters
                 chapters = self.fetch_chapters(manga_id, source)
                 if not chapters:
-                    print(f"[SKIP] No chapters found for '{manga_title}'")
+                    print(f"  [SKIP] No chapters found")
                     continue
 
-                print(f"[INFO] Found {len(chapters)} chapters")
+                print(f"  [INFO] Found {len(chapters)} chapters")
 
                 # Collect first N chapters
                 sample_chapters = chapters[:chapters_per_manga]
@@ -187,7 +222,7 @@ class ChapterPatternCollector:
                         "full_chapter_data": chapter
                     }
                     chapter_data["sample_chapters"].append(chapter_info)
-                    print(f"  [{i}] {chapter.get('title', 'NO TITLE')}")
+                    print(f"    [{i}] {chapter.get('title', 'NO TITLE')}")
 
                 self.collected_data.append(chapter_data)
                 collected_count += 1
@@ -196,7 +231,7 @@ class ChapterPatternCollector:
                 time.sleep(0.5)
 
             except Exception as e:
-                print(f"[ERROR] Failed to process '{query}': {e}")
+                print(f"  [ERROR] Failed to process: {e}")
                 continue
 
         return collected_count
@@ -244,50 +279,19 @@ def main():
     source = "mangahere"
     print(f"\n[INFO] Using source: {source}")
 
-    # Fetch manga dynamically from the source using varied search queries
-    print("[INFO] Fetching manga titles from source...")
+    # Fetch manga list from source
+    manga_limit = 200
+    manga_list = collector.get_all_manga(source, limit=manga_limit)
 
-    # Use common search terms to get diverse manga
-    search_terms = [
-        "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
-        "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
-        "one", "two", "three", "love", "death", "life", "world", "hero",
-        "god", "demon", "dragon", "king", "queen", "blood", "dark", "light"
-    ]
+    if not manga_list:
+        print("[ERROR] No manga found!")
+        return
 
-    manga_titles = []
-    seen_manga_ids = set()
-    target_manga_count = 150
+    print(f"\n[INFO] Fetched {len(manga_list)} manga from {source}")
+    print(f"[INFO] Expected total chapters: ~{len(manga_list) * 3}")
 
-    for term in search_terms:
-        if len(manga_titles) >= target_manga_count:
-            break
-
-        print(f"[INFO] Searching with term: '{term}'")
-        results = collector.search_manga(term, source)
-
-        for manga in results:
-            manga_id = manga.get('id')
-            manga_title = manga.get('title')
-
-            # Skip duplicates
-            if manga_id in seen_manga_ids:
-                continue
-
-            seen_manga_ids.add(manga_id)
-            manga_titles.append(manga_title)
-
-            if len(manga_titles) >= target_manga_count:
-                break
-
-        # Rate limiting
-        time.sleep(0.3)
-
-    print(f"\n[INFO] Fetched {len(manga_titles)} unique manga titles from {source}")
-    print(f"[INFO] Expected total chapters: ~{len(manga_titles) * 3}")
-
-    # Collect from all manga on mangahere
-    total_collected = collector.collect_from_source(source, manga_titles, chapters_per_manga=3)
+    # Collect chapter data from manga list
+    total_collected = collector.collect_from_manga_list(source, manga_list, chapters_per_manga=3)
 
     # Save results
     collector.save_results("chapter_patterns.json")
