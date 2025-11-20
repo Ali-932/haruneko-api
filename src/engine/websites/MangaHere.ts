@@ -18,7 +18,7 @@ export default class extends DecoratableMangaScraper /* MangaFox */ {
 
     public override async Initialize(): Promise<void> {
         const request = new Request(this.URI.href);
-        return FetchWindowScript(request, `window.cookie.set('isAdult', '1')`);
+        return FetchWindowScript(request, `document.cookie = 'isAdult=1; path=/; max-age=31536000'`);
     }
 
     public override get Icon() {
