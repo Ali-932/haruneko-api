@@ -37,6 +37,7 @@ export interface DownloadRequest {
     mangaId: string;
     chapterIds: string[];
     format?: 'cbz' | 'pdf' | 'epub' | 'images';
+    downloadPath?: string; // Optional custom download location (absolute path)
     options?: {
         quality?: 'low' | 'medium' | 'high';
         includeMetadata?: boolean;
@@ -58,6 +59,7 @@ export interface DownloadStatus {
     downloadedBytes?: number;
     currentChapter?: string;
     format: string;
+    downloadPath?: string; // Custom download location if specified
     createdAt: string;
     updatedAt: string;
     completedAt?: string;

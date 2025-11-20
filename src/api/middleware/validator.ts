@@ -12,6 +12,15 @@ export const schemas = {
         mangaId: z.string().min(1, 'Manga ID is required'),
         chapterIds: z.array(z.string()).min(1, 'At least one chapter ID is required'),
         format: z.enum(['cbz', 'pdf', 'epub', 'images']).default('cbz'),
+        downloadPath: z.string().optional().refine(
+            (path) => {
+                // If provided, ensure it's a valid path string (basic validation)
+                // More detailed validation happens in the service layer
+                if (!path) return true;
+                return typeof path === 'string' && path.length > 0;
+            },
+            { message: 'Download path must be a valid path string' }
+        ),
         options: z.object({
             quality: z.enum(['low', 'medium', 'high']).optional(),
             includeMetadata: z.boolean().optional(),

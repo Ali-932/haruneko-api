@@ -308,7 +308,7 @@ class HarunekoMangaService:
                 "format": format
             }
             if output_path:
-                payload["outputPath"] = output_path
+                payload["downloadPath"] = output_path
 
             print(f"[DEBUG] Queue download payload: {payload}")
             resp = self.session.post(
@@ -499,7 +499,8 @@ class HarunekoMangaService:
         chapter_number: str,
         source: str,
         dry_run: bool = False,
-        alternative_titles: Optional[List[str]] = None
+        alternative_titles: Optional[List[str]] = None,
+        download_path: Optional[str] = None
     ) -> Dict:
         """
         Main method: Download a specific chapter
@@ -510,6 +511,7 @@ class HarunekoMangaService:
             source: Source identifier (e.g., 'mangahere', 'mangafox')
             dry_run: Preview without downloading
             alternative_titles: List of alternative manga titles to try if main title fails
+            download_path: Custom download location (absolute or relative path)
 
         Returns:
             Dict with success status, images downloaded, folder path, etc.
@@ -588,7 +590,8 @@ class HarunekoMangaService:
             download_result = self.queue_download(
                 manga_id=manga_id,
                 chapter_id=chapter_id,
-                source=source
+                source=source,
+                output_path=download_path
             )
 
             download_id = download_result.get('id')
@@ -726,7 +729,8 @@ class HarunekoMangaService:
         source: str,
         dry_run: bool = False,
         alternative_titles: Optional[List[str]] = None,
-        validate_first: bool = True
+        validate_first: bool = True,
+        download_path: Optional[str] = None
     ) -> Dict:
         """
         Download multiple chapters with validation
@@ -738,6 +742,7 @@ class HarunekoMangaService:
             dry_run: Preview without downloading
             alternative_titles: List of alternative manga titles to try if main title fails
             validate_first: Validate all chapters exist before downloading (default: True)
+            download_path: Custom download location (absolute or relative path)
 
         Returns:
             Dict with success status, chapters downloaded, failed chapters, etc.
@@ -845,7 +850,8 @@ class HarunekoMangaService:
                     download_result = self.queue_download(
                         manga_id=manga_id,
                         chapter_id=chapter_id,
-                        source=source
+                        source=source,
+                        output_path=download_path
                     )
 
                     download_id = download_result.get('id')
@@ -994,7 +1000,8 @@ def main():
             manga_title=args.manga,
             chapter_number=str(chapter_numbers[0]),
             source=args.source,
-            dry_run=args.dry_run
+            dry_run=args.dry_run,
+            download_path=args.download_dir
         )
 
         # Print result
@@ -1020,7 +1027,8 @@ def main():
             chapter_numbers=chapter_numbers,
             source=args.source,
             dry_run=args.dry_run,
-            validate_first=not args.no_validate
+            validate_first=not args.no_validate,
+            download_path=args.download_dir
         )
 
         # Print result
