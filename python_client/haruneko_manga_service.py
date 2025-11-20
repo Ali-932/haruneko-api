@@ -1,6 +1,7 @@
 """
 Haruneko Manga Download Service - Production service for downloading manga chapters
 """
+import json
 import os
 import re
 import time
@@ -514,10 +515,182 @@ class HarunekoMangaService:
                 "error": str(e)
             }
 
+    def download_chapters(
+        self,
+        manga_title: str,
+        chapter_numbers: List[int],
+        source: str,
+        dry_run: bool = False,
+        alternative_titles: Optional[List[str]] = None,
+        validate_first: bool = True
+    ) -> Dict:
+        """
+        Download multiple chapters with validation
+
+        Args:
+            manga_title: Name of the manga
+            chapter_numbers: List of chapter numbers to download
+            source: Source identifier (e.g., 'mangahere', 'mangafox')
+            dry_run: Preview without downloading
+            alternative_titles: List of alternative manga titles to try if main title fails
+            validate_first: Validate all chapters exist before downloading (default: True)
+
+        Returns:
+            Dict with success status, chapters downloaded, failed chapters, etc.
+        """
+        results = {
+            "success": False,
+            "manga_title": None,
+            "total_chapters": len(chapter_numbers),
+            "successful_downloads": 0,
+            "failed_downloads": 0,
+            "downloaded_chapters": [],
+            "failed_chapters": [],
+            "missing_chapters": [],
+            "error": None
+        }
+
+        try:
+            # Build list of titles to try (main title + alternatives)
+            titles_to_try = [manga_title]
+            if alternative_titles:
+                titles_to_try.extend(alternative_titles)
+
+            chosen_manga = None
+
+            # Try each title until we find a match
+            for title in titles_to_try:
+                print(f"[INFO] Searching for manga: {title}")
+                chosen_manga = self.resolve_manga_id(title, source)
+                if chosen_manga:
+                    print(f"[INFO] Found manga using title: {title}")
+                    break
+
+            if not chosen_manga:
+                tried_titles = ", ".join(titles_to_try)
+                results["error"] = f"No manga results found for any title: {tried_titles}"
+                return results
+
+            manga_id = chosen_manga["id"]
+            manga_title_resolved = chosen_manga["title"]
+            results["manga_title"] = manga_title_resolved
+            print(f"[INFO] Using manga: {manga_title_resolved} (ID: {manga_id})")
+
+            # Validate chapters exist first (if requested)
+            if validate_first:
+                print(f"[INFO] Validating {len(chapter_numbers)} chapters exist...")
+                validation = self.validate_manga_has_chapters(
+                    manga_title_resolved,
+                    chapter_numbers,
+                    source
+                )
+
+                if not validation["success"]:
+                    results["missing_chapters"] = validation["missing_chapters"]
+                    results["error"] = validation["error"]
+                    print(f"[ERROR] Validation failed: {validation['error']}")
+                    return results
+
+                print("[INFO] All chapters validated successfully")
+
+            # Fetch chapter list once
+            print("[INFO] Fetching chapter list...")
+            chapters = self.fetch_chapters(manga_id, source)
+
+            if not chapters:
+                results["error"] = "Could not fetch any chapters for this manga."
+                return results
+
+            # Download each chapter
+            print(f"\n[INFO] Downloading {len(chapter_numbers)} chapters...")
+            for idx, chapter_num in enumerate(chapter_numbers, 1):
+                print(f"\n{'='*70}")
+                print(f"[{idx}/{len(chapter_numbers)}] Processing Chapter {chapter_num}")
+                print(f"{'='*70}")
+
+                try:
+                    # Resolve chapter
+                    chosen_chapter = self.resolve_chapter(chapters, str(chapter_num))
+                    if not chosen_chapter:
+                        error_msg = f"Chapter {chapter_num} not found"
+                        print(f"[ERROR] {error_msg}")
+                        results["failed_chapters"].append({
+                            "chapter_number": chapter_num,
+                            "error": error_msg
+                        })
+                        results["failed_downloads"] += 1
+                        continue
+
+                    chapter_id = chosen_chapter["id"]
+                    chapter_title = chosen_chapter["title"]
+                    print(f"[INFO] Resolved chapter: {chapter_title}")
+
+                    # Fetch image URLs
+                    print("[INFO] Retrieving image URLs...")
+                    image_urls = self.fetch_chapter_pages(manga_id, chapter_id, source)
+
+                    if not image_urls:
+                        error_msg = "No images returned for this chapter"
+                        print(f"[ERROR] {error_msg}")
+                        results["failed_chapters"].append({
+                            "chapter_number": chapter_num,
+                            "error": error_msg
+                        })
+                        results["failed_downloads"] += 1
+                        continue
+
+                    # Download images
+                    print(f"[INFO] Found {len(image_urls)} images. Downloading...")
+                    target_dir = self.download_images(
+                        manga_title_resolved,
+                        chapter_title,
+                        image_urls,
+                        dry_run=dry_run
+                    )
+
+                    # Record success
+                    results["downloaded_chapters"].append({
+                        "chapter_number": chapter_num,
+                        "chapter_title": chapter_title,
+                        "images_downloaded": len(image_urls),
+                        "folder_path": str(target_dir.resolve())
+                    })
+                    results["successful_downloads"] += 1
+                    print(f"[SUCCESS] Downloaded {len(image_urls)} images to {target_dir}")
+
+                except Exception as e:
+                    error_msg = str(e)
+                    print(f"[ERROR] Failed to download chapter {chapter_num}: {error_msg}")
+                    results["failed_chapters"].append({
+                        "chapter_number": chapter_num,
+                        "error": error_msg
+                    })
+                    results["failed_downloads"] += 1
+
+            # Determine overall success
+            if results["successful_downloads"] == len(chapter_numbers):
+                results["success"] = True
+                print(f"\n[SUCCESS] All {len(chapter_numbers)} chapters downloaded successfully!")
+            elif results["successful_downloads"] > 0:
+                results["success"] = True  # Partial success
+                results["error"] = f"Partial success: {results['failed_downloads']} chapters failed"
+                print(f"\n[WARNING] Partial success: {results['successful_downloads']}/{len(chapter_numbers)} chapters downloaded")
+            else:
+                results["error"] = "All chapter downloads failed"
+                print(f"\n[ERROR] All chapter downloads failed")
+
+            return results
+
+        except Exception as e:
+            results["error"] = str(e)
+            print(f"[ERROR] Download batch failed: {str(e)}")
+            return results
+
 
 def main():
     """Example usage"""
     import argparse
+    import json
 
     parser = argparse.ArgumentParser(
         description="Download manga chapters via Haruneko API"
@@ -541,10 +714,10 @@ def main():
         help="Manga title"
     )
     parser.add_argument(
-        "--chapter",
+        "--chapters",
         type=str,
         required=True,
-        help="Chapter number"
+        help="Chapter numbers (comma-separated list, e.g., '1,2,3' or single chapter '1')"
     )
     parser.add_argument(
         "--download-dir",
@@ -557,8 +730,22 @@ def main():
         action="store_true",
         help="Preview without downloading"
     )
+    parser.add_argument(
+        "--no-validate",
+        action="store_true",
+        help="Skip validation step (not recommended)"
+    )
 
     args = parser.parse_args()
+
+    # Parse chapter numbers
+    chapter_str = args.chapters.strip()
+    if ',' in chapter_str:
+        # Multiple chapters
+        chapter_numbers = [int(ch.strip()) for ch in chapter_str.split(',')]
+    else:
+        # Single chapter
+        chapter_numbers = [int(chapter_str)]
 
     # Create service
     service = HarunekoMangaService(
@@ -566,29 +753,59 @@ def main():
         download_root=args.download_dir
     )
 
-    # Download chapter
-    result = service.download_chapter(
-        manga_title=args.manga,
-        chapter_number=args.chapter,
-        source=args.source,
-        dry_run=args.dry_run
-    )
+    # Download chapters
+    if len(chapter_numbers) == 1:
+        # Single chapter download
+        print(f"[INFO] Downloading single chapter: {chapter_numbers[0]}")
+        result = service.download_chapter(
+            manga_title=args.manga,
+            chapter_number=str(chapter_numbers[0]),
+            source=args.source,
+            dry_run=args.dry_run
+        )
 
-    # Print result
-    print("\n" + "="*70)
-    print("DOWNLOAD RESULT")
-    print("="*70)
-    print(json.dumps(result, indent=2))
+        # Print result
+        print("\n" + "="*70)
+        print("DOWNLOAD RESULT")
+        print("="*70)
+        print(json.dumps(result, indent=2))
 
-    if result["success"]:
-        print(f"\n✓ Successfully downloaded {result['images_downloaded']} images")
-        print(f"  Location: {result['folder_path']}")
+        if result["success"]:
+            print(f"\n✓ Successfully downloaded {result['images_downloaded']} images")
+            print(f"  Location: {result['folder_path']}")
+        else:
+            print(f"\n✗ Download failed: {result['error']}")
+            if result.get("available_chapters"):
+                print(f"\nAvailable chapters:")
+                for ch in result["available_chapters"]:
+                    print(f"  - {ch}")
     else:
-        print(f"\n✗ Download failed: {result['error']}")
-        if result.get("available_chapters"):
-            print(f"\nAvailable chapters:")
-            for ch in result["available_chapters"]:
-                print(f"  - {ch}")
+        # Multiple chapters download
+        print(f"[INFO] Downloading {len(chapter_numbers)} chapters: {chapter_numbers}")
+        result = service.download_chapters(
+            manga_title=args.manga,
+            chapter_numbers=chapter_numbers,
+            source=args.source,
+            dry_run=args.dry_run,
+            validate_first=not args.no_validate
+        )
+
+        # Print result
+        print("\n" + "="*70)
+        print("BATCH DOWNLOAD RESULT")
+        print("="*70)
+        print(json.dumps(result, indent=2))
+
+        if result["success"]:
+            print(f"\n✓ Successfully downloaded {result['successful_downloads']}/{result['total_chapters']} chapters")
+            if result.get("failed_downloads", 0) > 0:
+                print(f"\n⚠ Failed chapters: {result['failed_downloads']}")
+                for failed in result.get("failed_chapters", []):
+                    print(f"  - Chapter {failed['chapter_number']}: {failed['error']}")
+        else:
+            print(f"\n✗ Download failed: {result['error']}")
+            if result.get("missing_chapters"):
+                print(f"\nMissing chapters: {result['missing_chapters']}")
 
 
 if __name__ == "__main__":
