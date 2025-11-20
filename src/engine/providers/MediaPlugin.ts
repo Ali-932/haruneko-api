@@ -2,8 +2,10 @@ import type { ISetting, ISettings, SettingsManager } from '../SettingsManager';
 import type { StorageController } from '../StorageController';
 import type { Tag } from '../Tags';
 import type { Priority } from '../taskpool/TaskPool';
-import icon from '../../img/media.webp';
 import { NotImplementedError } from '../Error';
+
+// Placeholder icon for API mode (no GUI assets needed)
+const icon = '';
 import { FetchWindowScript } from '../platform/FetchProvider';
 import { Observable, ObservableArray, type IObservable } from '../Observable';
 

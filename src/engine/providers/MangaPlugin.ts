@@ -3,8 +3,10 @@ import type { Check, Choice, Directory, ISettings, SettingsManager } from '../Se
 import { SanitizeFileName, type StorageController, Store } from '../StorageController';
 import { type Priority, TaskPool } from '../taskpool/TaskPool';
 import { MediaContainer, StoreableMediaContainer, MediaItem, MediaScraper } from './MediaPlugin';
-import icon from '../../img/manga.webp';
 import { NotImplementedError } from '../Error';
+
+// Placeholder icon for API mode (no GUI assets needed)
+const icon = '';
 import { CreateChapterExportRegistry } from '../exporters/MangaExporterRegistry';
 import { Observable } from '../Observable';
 import type { Tag } from '../Tags';

@@ -1,8 +1,15 @@
 import { type SettingsManager, Check, Numeric, Text, Secret, Choice, Directory } from './SettingsManager';
 import { EngineResourceKey as R, LocaleID } from '../i18n/ILocale';
-import type { IFrontendInfo } from '../frontend/IFrontend';
-import { Info as InfoClassic } from '../frontend/classic/FrontendInfo';
 import { MangaExportFormat } from './exporters/MangaExporterRegistry';
+
+/**
+ * Stub interface for frontend info (no longer needed in API-only mode)
+ */
+export interface IFrontendInfo {
+    readonly ID: string;
+    readonly Identifier: string;
+    readonly Label: string;
+}
 
 export const Scope = '*';
 
@@ -32,9 +39,9 @@ export async function Initialize(settingsManager: SettingsManager, frontends: IF
             Key.Frontend,
             R.Settings_Global_Frontend,
             R.Settings_Global_FrontendInfo,
-            InfoClassic.ID,
+            'api',
             ...frontends.map(info => {
-                return { key: info.ID, label: info.Label /* description: info.Description */ };
+                return { key: info.ID, label: info.Label as any /* description: info.Description */ };
             })
         ),
         new Choice(
@@ -42,8 +49,8 @@ export async function Initialize(settingsManager: SettingsManager, frontends: IF
             R.Settings_Global_Language,
             R.Settings_Global_LanguageInfo,
             LocaleID.Locale_enUS,
-            ...Object.entries(LocaleID).map(([key, label]) => {
-                return { key, label };
+            ...Object.entries(LocaleID).map(([key, value]) => {
+                return { key, label: value as any };
             })
         ),
         new Directory(

@@ -1,7 +1,9 @@
 import { type MediaChild, MediaContainer } from './MediaPlugin';
 import type { MediaInfoTracker } from '../trackers/IMediaInfoTracker';
-import icon from '../../img/warning.webp';
 import { Exception, NotImplementedError } from '../Error';
+
+// Placeholder icon for API mode (no GUI assets needed)
+const icon = '';
 import { WebsiteResourceKey as R } from '../../i18n/ILocale';
 import { type IObservable, Observable } from '../Observable';
 
