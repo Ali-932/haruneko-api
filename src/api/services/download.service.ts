@@ -35,6 +35,23 @@ class DownloadService {
     public async createDownload(request: DownloadRequest): Promise<DownloadStatus> {
         const downloadId = randomUUID();
 
+        // Validate and prepare custom download path if provided
+        const downloadPath = request.downloadPath
+            ? path.resolve(request.downloadPath) // Convert to absolute path
+            : this.downloadDir;
+
+        // Ensure the custom download directory exists
+        if (request.downloadPath) {
+            try {
+                await fs.mkdir(downloadPath, { recursive: true });
+                logger.info(`Using custom download path: ${downloadPath}`);
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                logger.error(`Failed to create custom download directory: ${downloadPath}`, error);
+                throw new Error(`Invalid download path: ${errorMessage}`);
+            }
+        }
+
         const status: DownloadStatus = {
             id: downloadId,
             sourceId: request.sourceId,
@@ -43,6 +60,7 @@ class DownloadService {
             status: 'queued',
             progress: 0,
             format: request.format || 'cbz',
+            downloadPath: request.downloadPath ? downloadPath : undefined, // Store custom path if provided
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
         };
@@ -50,7 +68,7 @@ class DownloadService {
         this.downloads.set(downloadId, status);
 
         // Start download asynchronously
-        this.processDownload(downloadId, request).catch((error) => {
+        this.processDownload(downloadId, request, downloadPath).catch((error) => {
             logger.error(`Download ${downloadId} failed:`, error);
             this.updateDownloadStatus(downloadId, {
                 status: 'failed',
@@ -64,7 +82,7 @@ class DownloadService {
     /**
      * Process a download
      */
-    private async processDownload(downloadId: string, request: DownloadRequest): Promise<void> {
+    private async processDownload(downloadId: string, request: DownloadRequest, downloadPath: string): Promise<void> {
         try {
             this.updateDownloadStatus(downloadId, { status: 'downloading' });
 
@@ -108,7 +126,7 @@ class DownloadService {
             });
 
             // Download chapters and create export
-            await this.downloadAndExport(downloadId, request, chaptersToDownload, manga.Title);
+            await this.downloadAndExport(downloadId, request, chaptersToDownload, manga.Title, downloadPath);
 
             this.updateDownloadStatus(downloadId, {
                 status: 'completed',
@@ -162,7 +180,7 @@ class DownloadService {
     /**
      * Download chapters and create export file
      */
-    private async downloadAndExport(downloadId: string, request: DownloadRequest, chapters: any[], mangaTitle: string): Promise<string> {
+    private async downloadAndExport(downloadId: string, request: DownloadRequest, chapters: any[], mangaTitle: string, downloadPath: string): Promise<string> {
         const storageController = engineService.getStorageController();
         const format = request.format || 'cbz';
 
@@ -232,12 +250,12 @@ class DownloadService {
                 if (format === 'cbz') {
                     // Use clean format: berserk/chapter_1.cbz, berserk/chapter_2.cbz, etc.
                     const fileName = `chapter_${chapterNumber}.cbz`;
-                    outputPath = path.join(this.downloadDir, sanitizedMangaTitle, fileName);
+                    outputPath = path.join(downloadPath, sanitizedMangaTitle, fileName);
                     exporter = new NodeComicBookArchiveExporter(storageController);
                 } else if (format === 'images') {
                     // Use clean format: berserk/chapter_1, berserk/chapter_2, etc.
                     const dirName = `chapter_${chapterNumber}`;
-                    outputPath = path.join(this.downloadDir, sanitizedMangaTitle, dirName);
+                    outputPath = path.join(downloadPath, sanitizedMangaTitle, dirName);
                     exporter = new NodeImageDirectoryExporter(storageController);
                 } else {
                     throw new Error(`Unsupported format: ${format}`);
@@ -310,7 +328,9 @@ class DownloadService {
             ? SanitizeFileName(download.mangaTitle)
             : SanitizeFileName(download.mangaId);
 
-        const mangaDir = path.join(this.downloadDir, folderName);
+        // Use custom download path if it was specified, otherwise use default
+        const baseDir = download.downloadPath || this.downloadDir;
+        const mangaDir = path.join(baseDir, folderName);
 
         // Check if manga directory exists
         try {
