@@ -97,15 +97,23 @@ class HarunekoMangaService:
         """
         def _make_request():
             resp = self.session.get(
-                f"{self.base_url}/api/manga",
-                params={"source": source, "search": query},
+                f"{self.base_url}/api/v1/sources/{source}/search",
+                params={"query": query},
                 timeout=30
             )
             resp.raise_for_status()
             return resp
 
         resp = self._request_with_retry(_make_request)
-        return resp.json()
+        data = resp.json()
+
+        # Handle API response format
+        if isinstance(data, dict) and data.get('success'):
+            return data.get('data', [])
+        elif isinstance(data, list):
+            return data
+        else:
+            return []
 
     @staticmethod
     def _normalize_title(title: str) -> str:
@@ -170,17 +178,28 @@ class HarunekoMangaService:
         Returns:
             List of chapter dictionaries
         """
+        import requests
+
         def _make_request():
+            # URL encode the manga_id to handle special characters
+            encoded_manga_id = requests.utils.quote(manga_id, safe='')
             resp = self.session.get(
-                f"{self.base_url}/api/manga/{manga_id}/chapters",
-                params={"source": source},
+                f"{self.base_url}/api/v1/sources/{source}/manga/{encoded_manga_id}/chapters",
                 timeout=30
             )
             resp.raise_for_status()
             return resp
 
         resp = self._request_with_retry(_make_request)
-        return resp.json()
+        data = resp.json()
+
+        # Handle API response format
+        if isinstance(data, dict) and data.get('success'):
+            return data.get('data', [])
+        elif isinstance(data, list):
+            return data
+        else:
+            return []
 
     def resolve_chapter(
         self,
@@ -225,23 +244,38 @@ class HarunekoMangaService:
 
         return None
 
-    # 3. Get chapter images ----------------------------------------------------
-    def fetch_chapter_pages(self, manga_id: str, chapter_id: str, source: str) -> List[str]:
+    # 3. Download via queue system --------------------------------------------
+    def queue_download(
+        self,
+        manga_id: str,
+        chapter_id: str,
+        source: str,
+        output_path: Optional[str] = None
+    ) -> Dict:
         """
-        Fetch page image URLs for a chapter
+        Queue a chapter for download via Haruneko download API
 
         Args:
             manga_id: Manga identifier
             chapter_id: Chapter identifier
             source: Source identifier
+            output_path: Optional output path for download
 
         Returns:
-            List of image URLs
+            Download queue response with download ID
         """
         def _make_request():
-            resp = self.session.get(
-                f"{self.base_url}/api/manga/{manga_id}/chapters/{chapter_id}/pages",
-                params={"source": source},
+            payload = {
+                "source": source,
+                "mangaId": manga_id,
+                "chapterId": chapter_id
+            }
+            if output_path:
+                payload["outputPath"] = output_path
+
+            resp = self.session.post(
+                f"{self.base_url}/api/v1/downloads",
+                json=payload,
                 timeout=30
             )
             resp.raise_for_status()
@@ -250,15 +284,44 @@ class HarunekoMangaService:
         resp = self._request_with_retry(_make_request)
         data = resp.json()
 
-        # Handle different response formats
-        if isinstance(data, list):
-            return data
-        elif isinstance(data, dict) and "pages" in data:
-            return data["pages"]
+        # Handle API response format
+        if isinstance(data, dict) and data.get('success'):
+            return data.get('data', {})
         else:
-            raise ValueError(f"Unexpected response format: {type(data)}")
+            return data
 
-    # 4. Download images -------------------------------------------------------
+    def get_download_status(self, download_id: str) -> Dict:
+        """
+        Get status of a queued download
+
+        Args:
+            download_id: Download identifier
+
+        Returns:
+            Download status information
+        """
+        def _make_request():
+            resp = self.session.get(
+                f"{self.base_url}/api/v1/downloads/{download_id}",
+                timeout=30
+            )
+            resp.raise_for_status()
+            return resp
+
+        resp = self._request_with_retry(_make_request)
+        data = resp.json()
+
+        # Handle API response format
+        if isinstance(data, dict) and data.get('success'):
+            return data.get('data', {})
+        else:
+            return data
+
+    # NOTE: Haruneko API uses a queue-based download system
+    # Direct image URL fetching is not available via HTTP API
+    # Use queue_download() and get_download_status() instead
+
+    # 4. Legacy compatibility method -------------------------------------------
     def download_images(
         self,
         manga_title: str,
