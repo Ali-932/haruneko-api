@@ -263,13 +263,13 @@ class HarunekoMangaService:
             return None
 
         # Try to match by chapter number
-        # Pattern: "Ch.XXX" format (ignores volume numbers)
+        # Pattern: "Ch.XXX" or "Chapter XXX" format (ignores volume numbers)
         for chap in chapters:
             title = chap["title"].strip().lower()
 
-            # Look for chapter number after "ch" keyword
-            # Matches: "ch.008", "ch008", "ch.8.1", "ch.262.5", etc.
-            chapter_match = re.search(r'ch\.?(\d+(?:\.\d+)?)', title)
+            # Look for chapter number after "ch" or "chapter" keyword
+            # Matches: "ch.008", "ch008", "ch.8.1", "chapter 1", "chapter 262.5", etc.
+            chapter_match = re.search(r'ch(?:apter)?\.?\s*(\d+(?:\.\d+)?)', title)
 
             if chapter_match:
                 try:
@@ -296,7 +296,7 @@ class HarunekoMangaService:
         chapter_id: str,
         source: str,
         output_path: Optional[str] = None,
-        format: str = 'cbz'
+        format: str = 'images'
     ) -> Dict:
         """
         Queue a chapter for download via Haruneko download API
